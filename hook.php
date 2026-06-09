@@ -68,3 +68,8 @@ function plugin_mailthreadlink_rule_add(RuleMailCollector $rule): void
 {
     PluginMailthreadlinkThreadmatcher::ensureRuleAction((int) $rule->getID());
 }
+
+function plugin_mailthreadlink_item_purge(Ticket $ticket): void
+{
+    PluginMailthreadlinkThreadmatcher::forgetTicket((int) $ticket->getID());
+}

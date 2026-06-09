@@ -50,6 +50,14 @@ assertSameValue(
 );
 
 assertSameValue(
+    ['bare-parent@example.test', 'bracketed-parent@example.test'],
+    PluginMailthreadlinkThreadmatcher::referenceMessageIds([
+        'references' => '<bracketed-parent@example.test> bare-parent@example.test',
+    ]),
+    'Mixed bracketed and bare references are both retained.'
+);
+
+assertSameValue(
     [],
     PluginMailthreadlinkThreadmatcher::referenceMessageIds([]),
     'Missing thread headers do not produce a match.'

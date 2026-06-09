@@ -14,6 +14,8 @@ notification.
    and follow-up creation.
 4. GLPI's normal follow-up permission checks remain in force.
 5. Already processed `Message-ID` values are rejected to prevent duplicates.
+6. The sender must be a ticket actor, an alternate ticket address, or a linked
+   supplier.
 
 The plugin never links messages by subject alone.
 
@@ -47,7 +49,17 @@ table. Back up that table first when the mappings need to be retained.
 - Grant observers only the follow-up permissions they need.
 - Keep GLPI's normal requester and observer permission checks enabled.
 - Do not add subject-only mail rules as a fallback.
+- Keep SPF, DKIM, and DMARC checks enabled on the receiving mail server. Email
+  addresses are the identity boundary used by GLPI's mail collector.
 - Monitor rejected and unimported emails after rollout.
+
+For reliable duplicate detection, incoming messages need a valid RFC
+`Message-ID`. GLPI can process a message without one, but repeated copies
+cannot be identified reliably.
+
+Do not run two collectors against the same IMAP mailbox simultaneously. The
+plugin prevents duplicate follow-ups, but GLPI itself may fail when concurrent
+processes try to remove the same IMAP message.
 
 ## Tests
 

@@ -19,6 +19,9 @@ function plugin_init_mailthreadlink(): void
         ITILFollowup::class => 'plugin_mailthreadlink_item_add',
         RuleMailCollector::class => 'plugin_mailthreadlink_rule_add',
     ];
+    $PLUGIN_HOOKS['item_purge']['mailthreadlink'] = [
+        Ticket::class => 'plugin_mailthreadlink_item_purge',
+    ];
 }
 
 function plugin_version_mailthreadlink(): array

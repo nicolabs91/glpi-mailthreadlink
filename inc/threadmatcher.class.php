@@ -7,6 +7,8 @@ class PluginMailthreadlinkThreadmatcher
     public const ACTION_TYPE = 'mailthreadlink';
     public const FALLBACK_RULE_NAME = 'Mail Thread Link fallback';
 
+    private static array $messageLocks = [];
+
     public static function ensureSchema(): void
     {
         global $DB;
@@ -41,9 +43,13 @@ class PluginMailthreadlinkThreadmatcher
             return [];
         }
 
+        self::removeExpiredClaims();
+
         $message_id = self::normalizeMessageId((string) ($headers['message_id'] ?? ''));
-        if ($message_id !== '' && self::messageExists($message_id)) {
-            return ['_refuse_email_no_response' => 1];
+        if ($message_id !== '') {
+            if (self::messageExists($message_id)) {
+                return ['_refuse_email_no_response' => 1];
+            }
         }
 
         foreach (self::referenceMessageIds($headers) as $reference) {
@@ -58,6 +64,20 @@ class PluginMailthreadlinkThreadmatcher
                 || (int) $ticket->fields['status'] === CommonITILObject::CLOSED
             ) {
                 continue;
+            }
+
+            $requester_id = (int) (
+                $params['params']['_users_id_requester']
+                ?? $ticket_input['_users_id_requester']
+                ?? 0
+            );
+            $sender_email = (string) ($headers['from'] ?? '');
+            if (!self::isAuthorizedSender($ticket_id, $requester_id, $sender_email)) {
+                return ['_refuse_email_no_response' => 1];
+            }
+
+            if ($message_id !== '' && !self::claimMessage($message_id, $ticket_id)) {
+                return ['_refuse_email_no_response' => 1];
             }
 
             return [
@@ -120,6 +140,17 @@ class PluginMailthreadlinkThreadmatcher
         foreach ($rules as $rule) {
             self::ensureRuleAction((int) $rule['id']);
         }
+    }
+
+    public static function forgetTicket(int $ticket_id): void
+    {
+        global $DB;
+
+        if ($ticket_id <= 0 || !$DB->tableExists(self::TABLE)) {
+            return;
+        }
+
+        $DB->delete(self::TABLE, ['tickets_id' => $ticket_id]);
     }
 
     public static function ensureFallbackRule(): void
@@ -216,10 +247,12 @@ class PluginMailthreadlinkThreadmatcher
                 continue;
             }
 
-            preg_match_all('/<([^>]+)>/', $value, $matches);
-            $ids = $matches[1] ?? [];
-            if ($ids === []) {
-                $ids = preg_split('/\s+/', trim($value)) ?: [];
+            preg_match_all('/<([^>]+)>|([^\s<>]+)/', $value, $matches, PREG_SET_ORDER);
+            $ids = [];
+            foreach ($matches as $match) {
+                $ids[] = ($match[1] ?? '') !== ''
+                    ? $match[1]
+                    : ($match[2] ?? '');
             }
 
             foreach (array_reverse($ids) as $id) {
@@ -261,6 +294,105 @@ class PluginMailthreadlinkThreadmatcher
         return self::findTicketId($message_id) !== null;
     }
 
+    private static function claimMessage(string $message_id, int $ticket_id): bool
+    {
+        global $DB;
+
+        if (!$DB->tableExists(self::TABLE)) {
+            return true;
+        }
+
+        $hash = hash('sha256', $message_id);
+        $lock_name = 'mailthreadlink.' . substr($hash, 0, 40);
+        if (isset(self::$messageLocks[$hash]) || !$DB->getLock($lock_name)) {
+            return false;
+        }
+        self::$messageLocks[$hash] = $lock_name;
+
+        $now = $_SESSION['glpi_currenttime'] ?? date('Y-m-d H:i:s');
+        $DB->doQuery(
+            'INSERT IGNORE INTO `' . self::TABLE . '`'
+            . ' (`message_hash`, `message_id`, `tickets_id`, `itemtype`, `items_id`, `date_creation`)'
+            . ' VALUES ('
+            . DBmysql::quoteValue($hash) . ', '
+            . DBmysql::quoteValue(mb_substr($message_id, 0, 998)) . ', '
+            . $ticket_id . ', '
+            . DBmysql::quoteValue('Pending') . ', 0, '
+            . DBmysql::quoteValue($now)
+            . ')'
+        );
+
+        if ($DB->affectedRows() === 1) {
+            return true;
+        }
+
+        self::releaseMessageLock($hash);
+        return false;
+    }
+
+    private static function removeExpiredClaims(): void
+    {
+        global $DB;
+
+        if (!$DB->tableExists(self::TABLE)) {
+            return;
+        }
+
+        $expired_before = date('Y-m-d H:i:s', time() - 600);
+        $DB->doQuery(
+            'DELETE FROM `' . self::TABLE . '`'
+            . ' WHERE `itemtype` = ' . DBmysql::quoteValue('Pending')
+            . ' AND `date_creation` < ' . DBmysql::quoteValue($expired_before)
+        );
+    }
+
+    private static function releaseMessageLock(string $hash): void
+    {
+        global $DB;
+
+        if (!isset(self::$messageLocks[$hash])) {
+            return;
+        }
+
+        $DB->releaseLock(self::$messageLocks[$hash]);
+        unset(self::$messageLocks[$hash]);
+    }
+
+    private static function isAuthorizedSender(
+        int $ticket_id,
+        int $users_id,
+        string $sender_email
+    ): bool {
+        global $DB;
+
+        if ($users_id > 0) {
+            $actor = $DB->request([
+                'COUNT' => 'cpt',
+                'FROM' => Ticket_User::getTable(),
+                'WHERE' => [
+                    'tickets_id' => $ticket_id,
+                    'users_id' => $users_id,
+                ],
+            ])->current();
+            if ((int) ($actor['cpt'] ?? 0) > 0) {
+                return true;
+            }
+        }
+
+        $sender_email = trim($sender_email);
+        if ($sender_email === '') {
+            return false;
+        }
+
+        $ticket_user = new Ticket_User();
+        if ($ticket_user->isAlternateEmailForITILObject($ticket_id, $sender_email)) {
+            return true;
+        }
+
+        $supplier_ticket = new Supplier_Ticket();
+        return $supplier_ticket->isSupplierEmail($ticket_id, $sender_email);
+    }
+
     private static function storeMessage(
         string $message_id,
         int $ticket_id,
@@ -274,17 +406,33 @@ class PluginMailthreadlinkThreadmatcher
         }
 
         $hash = hash('sha256', $message_id);
-        if (self::messageExists($message_id)) {
-            return;
-        }
+        try {
+            $DB->update(self::TABLE, [
+                'tickets_id' => $ticket_id,
+                'itemtype' => $itemtype,
+                'items_id' => $items_id,
+            ], [
+                'message_hash' => $hash,
+                'itemtype' => 'Pending',
+            ]);
+            if ($DB->affectedRows() > 0) {
+                return;
+            }
 
-        $DB->insert(self::TABLE, [
-            'message_hash' => $hash,
-            'message_id' => mb_substr($message_id, 0, 998),
-            'tickets_id' => $ticket_id,
-            'itemtype' => $itemtype,
-            'items_id' => $items_id,
-            'date_creation' => $_SESSION['glpi_currenttime'] ?? date('Y-m-d H:i:s'),
-        ]);
+            if (self::messageExists($message_id)) {
+                return;
+            }
+
+            $DB->insert(self::TABLE, [
+                'message_hash' => $hash,
+                'message_id' => mb_substr($message_id, 0, 998),
+                'tickets_id' => $ticket_id,
+                'itemtype' => $itemtype,
+                'items_id' => $items_id,
+                'date_creation' => $_SESSION['glpi_currenttime'] ?? date('Y-m-d H:i:s'),
+            ]);
+        } finally {
+            self::releaseMessageLock($hash);
+        }
     }
 }
