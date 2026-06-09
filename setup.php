@@ -4,7 +4,7 @@ if (!defined('GLPI_ROOT')) {
     die('Sorry. You cannot access this file directly');
 }
 
-define('PLUGIN_MAILTHREADLINK_VERSION', '0.2.0');
+define('PLUGIN_MAILTHREADLINK_VERSION', '0.1.0');
 
 function plugin_init_mailthreadlink(): void
 {
