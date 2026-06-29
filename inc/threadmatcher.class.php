@@ -133,6 +133,35 @@ class PluginMailthreadlinkThreadmatcher
         );
     }
 
+    public static function suppressReplyAllEchoNotification(ITILFollowup $followup): void
+    {
+        if (!is_array($followup->input)) {
+            return;
+        }
+
+        if (self::shouldDisableFollowupNotification($followup->input)) {
+            $followup->input['_disablenotif'] = 1;
+        }
+    }
+
+    public static function shouldDisableFollowupNotification(array $input): bool
+    {
+        $headers = $input['_head'] ?? [];
+        if (!is_array($headers) || $headers === []) {
+            return false;
+        }
+
+        if (($input['itemtype'] ?? '') !== Ticket::class) {
+            return false;
+        }
+
+        if ((int) ($input['items_id'] ?? 0) <= 0) {
+            return false;
+        }
+
+        return self::hasDirectHumanRecipients($headers);
+    }
+
     public static function attachActionToAllRules(): void
     {
         global $DB;

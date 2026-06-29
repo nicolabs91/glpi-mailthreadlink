@@ -64,6 +64,11 @@ function plugin_mailthreadlink_item_add(CommonDBTM $item): void
     PluginMailthreadlinkThreadmatcher::rememberItem($item);
 }
 
+function plugin_mailthreadlink_pre_item_add(ITILFollowup $followup): void
+{
+    PluginMailthreadlinkThreadmatcher::suppressReplyAllEchoNotification($followup);
+}
+
 function plugin_mailthreadlink_rule_add(RuleMailCollector $rule): void
 {
     PluginMailthreadlinkThreadmatcher::ensureRuleAction((int) $rule->getID());

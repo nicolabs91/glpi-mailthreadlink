@@ -96,4 +96,35 @@ assertSameValue(
     'Display names are normalized before comparing email recipients.'
 );
 
+assertSameValue(
+    true,
+    PluginMailthreadlinkThreadmatcher::shouldDisableFollowupNotification([
+        'itemtype' => 'Ticket',
+        'items_id' => 3759,
+        '_head' => [
+            'from' => 'n.janssen91@gmail.com',
+            'to' => null,
+            'tos' => ['n.janssen@lbghotels.com'],
+            'ccs' => ['support@lbghotels.com'],
+            'references' => '<GLPI_z0IFN2x4AfAv2gbqRtmNpsUwzi69DZsPKjvwGz4Q-Ticket-3759/new@cbd52f2be740>',
+        ],
+    ]),
+    'GLPI-native threaded reply-all follow-ups suppress the support echo notification.'
+);
+
+assertSameValue(
+    false,
+    PluginMailthreadlinkThreadmatcher::shouldDisableFollowupNotification([
+        'itemtype' => 'Ticket',
+        'items_id' => 3759,
+        '_head' => [
+            'from' => 'n.janssen91@gmail.com',
+            'to' => 'support@lbghotels.com',
+            'tos' => ['support@lbghotels.com'],
+            'ccs' => [],
+        ],
+    ]),
+    'Support-only mailcollector follow-ups keep regular GLPI notifications enabled.'
+);
+
 fwrite(STDOUT, "Mail Thread Link header tests passed.\n");

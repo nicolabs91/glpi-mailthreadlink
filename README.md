@@ -18,7 +18,7 @@ notification.
    supplier.
 7. Reply-all follow-ups that already went directly to other recipients are
    imported without sending a second GLPI follow-up notification to the same
-   conversation.
+   conversation, including replies matched by GLPI's native ticket headers.
 
 The plugin never links messages by subject alone.
 

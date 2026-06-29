@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2 - 2026-06-29
+
+- Suppress reply-all notification echoes for GLPI-native threaded follow-ups,
+  not only follow-ups matched by the plugin rule action.
+- Add a pre-add follow-up hook so mailcollector replies can disable the GLPI
+  notification before `ITILFollowup` raises the `add_followup` event.
+- Add regression coverage for replies where support is in `Cc` and the direct
+  recipient is in `To`.
+
 ## 0.1.1 - 2026-06-29
 
 - Suppress GLPI's extra follow-up notification for reply-all mail collector
