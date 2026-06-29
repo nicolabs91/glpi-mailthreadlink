@@ -80,11 +80,17 @@ class PluginMailthreadlinkThreadmatcher
                 return ['_refuse_email_no_response' => 1];
             }
 
-            return [
+            $output = [
                 'tickets_id' => $ticket_id,
                 'requesttypes_id' => RequestType::getDefault('mailfollowup'),
                 'add_reopen' => 1,
             ];
+
+            if (self::shouldSuppressReplyAllEcho($headers, $params)) {
+                $output['_disablenotif'] = 1;
+            }
+
+            return $output;
         }
 
         return [];
@@ -264,6 +270,54 @@ class PluginMailthreadlinkThreadmatcher
         }
 
         return $references;
+    }
+
+    public static function hasDirectHumanRecipients(array $headers, array $collector_emails = []): bool
+    {
+        $ignored = array_filter(array_map(
+            static fn ($email) => self::normalizeEmail((string) $email),
+            array_merge($collector_emails, [(string) ($headers['from'] ?? ''), (string) ($headers['to'] ?? '')])
+        ));
+
+        foreach (['tos', 'ccs'] as $header) {
+            $values = $headers[$header] ?? [];
+            if (!is_array($values)) {
+                continue;
+            }
+
+            foreach ($values as $email) {
+                $normalized = self::normalizeEmail((string) $email);
+                if ($normalized !== '' && !in_array($normalized, $ignored, true)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static function shouldSuppressReplyAllEcho(array $headers, array $params): bool
+    {
+        $collector_emails = [];
+        $mailcollector_id = (int) ($params['params']['mailcollector'] ?? 0);
+        if ($mailcollector_id > 0 && class_exists(MailCollector::class)) {
+            $collector = new MailCollector();
+            if ($collector->getFromDB($mailcollector_id)) {
+                $collector_emails[] = (string) ($collector->fields['name'] ?? '');
+            }
+        }
+
+        return self::hasDirectHumanRecipients($headers, $collector_emails);
+    }
+
+    private static function normalizeEmail(string $email): string
+    {
+        $email = trim($email);
+        if (preg_match('/<([^>]+)>/', $email, $matches) === 1) {
+            $email = $matches[1];
+        }
+
+        return strtolower(trim($email));
     }
 
     private static function findTicketId(string $message_id): ?int

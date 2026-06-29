@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1 - 2026-06-29
+
+- Suppress GLPI's extra follow-up notification for reply-all mail collector
+  imports when the incoming message already went directly to other human
+  recipients.
+- Keep regular GLPI follow-up notifications enabled for replies sent only to
+  the support mailbox.
+- Add header tests for reply-all notification echo detection.
+
 ## 0.1.0 - 2026-06-09
 
 - Preserve and match original RFC `Message-ID` values.

@@ -16,6 +16,9 @@ notification.
 5. Already processed `Message-ID` values are rejected to prevent duplicates.
 6. The sender must be a ticket actor, an alternate ticket address, or a linked
    supplier.
+7. Reply-all follow-ups that already went directly to other recipients are
+   imported without sending a second GLPI follow-up notification to the same
+   conversation.
 
 The plugin never links messages by subject alone.
 

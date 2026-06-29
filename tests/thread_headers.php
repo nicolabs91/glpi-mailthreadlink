@@ -63,4 +63,37 @@ assertSameValue(
     'Missing thread headers do not produce a match.'
 );
 
+assertSameValue(
+    false,
+    PluginMailthreadlinkThreadmatcher::hasDirectHumanRecipients([
+        'from' => 'or.shwartz@plusgrade.com',
+        'to' => 'support@lbghotels.com',
+        'tos' => ['support@lbghotels.com'],
+        'ccs' => [],
+    ], ['support@lbghotels.com']),
+    'Support-only replies keep regular GLPI notifications enabled.'
+);
+
+assertSameValue(
+    true,
+    PluginMailthreadlinkThreadmatcher::hasDirectHumanRecipients([
+        'from' => 'or.shwartz@plusgrade.com',
+        'to' => 'support@lbghotels.com',
+        'tos' => ['edith.vonken@lbghotels.com', 'support@lbghotels.com'],
+        'ccs' => ['armando.vermeulen@lbghotels.com'],
+    ], ['support@lbghotels.com']),
+    'Reply-all messages suppress the GLPI echo notification.'
+);
+
+assertSameValue(
+    false,
+    PluginMailthreadlinkThreadmatcher::hasDirectHumanRecipients([
+        'from' => 'Or Shwartz <or.shwartz@plusgrade.com>',
+        'to' => 'IT Support <support@lbghotels.com>',
+        'tos' => ['IT Support <support@lbghotels.com>'],
+        'ccs' => ['Or Shwartz <or.shwartz@plusgrade.com>'],
+    ], ['support@lbghotels.com']),
+    'Display names are normalized before comparing email recipients.'
+);
+
 fwrite(STDOUT, "Mail Thread Link header tests passed.\n");
