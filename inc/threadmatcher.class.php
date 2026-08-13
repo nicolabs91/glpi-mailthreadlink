@@ -3,6 +3,7 @@
 class PluginMailthreadlinkThreadmatcher
 {
     public const TABLE = 'glpi_plugin_mailthreadlink_messages';
+    public const LOG_TABLE = 'glpi_plugin_mailthreadlink_log';
     public const ACTION_FIELD = '_mailthreadlink';
     public const ACTION_TYPE = 'mailthreadlink';
     public const FALLBACK_RULE_NAME = 'Mail Thread Link fallback';
@@ -13,12 +14,9 @@ class PluginMailthreadlinkThreadmatcher
     {
         global $DB;
 
-        if ($DB->tableExists(self::TABLE)) {
-            return;
-        }
-
-        $DB->doQuery(
-            'CREATE TABLE `' . self::TABLE . '` (
+        if (!$DB->tableExists(self::TABLE)) {
+            $DB->doQuery(
+                'CREATE TABLE `' . self::TABLE . '` (
                 `id` int unsigned NOT NULL AUTO_INCREMENT,
                 `message_hash` char(64) NOT NULL,
                 `message_id` varchar(998) NOT NULL,
@@ -30,8 +28,30 @@ class PluginMailthreadlinkThreadmatcher
                 UNIQUE KEY `message_hash` (`message_hash`),
                 KEY `tickets_id` (`tickets_id`),
                 KEY `item` (`itemtype`, `items_id`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
-        );
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+            );
+        }
+
+        if (!$DB->tableExists(self::LOG_TABLE)) {
+            $DB->doQuery(
+                'CREATE TABLE `' . self::LOG_TABLE . '` (
+                    `id` int unsigned NOT NULL AUTO_INCREMENT,
+                    `date_creation` timestamp NULL DEFAULT NULL,
+                    `result` varchar(32) NOT NULL,
+                    `reason` varchar(64) NOT NULL,
+                    `message_hash` char(64) NULL,
+                    `message_id` varchar(998) NULL,
+                    `sender` varchar(255) NULL,
+                    `tickets_id` int unsigned NULL,
+                    `details` varchar(255) NULL,
+                    PRIMARY KEY (`id`),
+                    KEY `date_creation` (`date_creation`),
+                    KEY `reason` (`reason`),
+                    KEY `message_hash` (`message_hash`),
+                    KEY `tickets_id` (`tickets_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+            );
+        }
     }
 
     public static function match(array $params): array
@@ -48,6 +68,7 @@ class PluginMailthreadlinkThreadmatcher
         $message_id = self::normalizeMessageId((string) ($headers['message_id'] ?? ''));
         if ($message_id !== '') {
             if (self::messageExists($message_id)) {
+                self::logEvent($headers, 'refused', 'duplicate_message_id');
                 return ['_refuse_email_no_response' => 1];
             }
         }
@@ -71,13 +92,21 @@ class PluginMailthreadlinkThreadmatcher
                 ?? $ticket_input['_users_id_requester']
                 ?? 0
             );
-            $sender_email = (string) ($headers['from'] ?? '');
+            $sender_email = self::normalizeEmail((string) ($headers['from'] ?? ''));
             if (!self::isAuthorizedSender($ticket_id, $requester_id, $sender_email)) {
-                return ['_refuse_email_no_response' => 1];
+                self::logEvent($headers, 'fallback', 'sender_not_authorized', $ticket_id);
+                // Do not reject an otherwise valid message just because the
+                // thread sender cannot be mapped to this ticket. Returning no
+                // rule action lets GLPI apply its normal new-ticket rules.
+                continue;
             }
 
             if ($message_id !== '' && !self::claimMessage($message_id, $ticket_id)) {
-                return ['_refuse_email_no_response' => 1];
+                self::logEvent($headers, 'fallback', 'temporary_claim_conflict', $ticket_id);
+                // A concurrent collector must not send a message to Refused
+                // merely because this plugin could not claim it. Let GLPI's
+                // normal collector processing decide how to handle it.
+                continue;
             }
 
             $output = [
@@ -186,6 +215,26 @@ class PluginMailthreadlinkThreadmatcher
         }
 
         $DB->delete(self::TABLE, ['tickets_id' => $ticket_id]);
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public static function getLogRows(int $limit = 100): array
+    {
+        global $DB;
+
+        if (!$DB->tableExists(self::LOG_TABLE)) {
+            return [];
+        }
+
+        $rows = [];
+        foreach ($DB->request([
+            'FROM' => self::LOG_TABLE,
+            'ORDER' => ['date_creation DESC', 'id DESC'],
+            'LIMIT' => max(1, min($limit, 500)),
+        ]) as $row) {
+            $rows[] = $row;
+        }
+        return $rows;
     }
 
     public static function ensureFallbackRule(): void
@@ -374,7 +423,22 @@ class PluginMailthreadlinkThreadmatcher
 
     private static function messageExists(string $message_id): bool
     {
-        return self::findTicketId($message_id) !== null;
+        global $DB;
+
+        if (!$DB->tableExists(self::TABLE)) {
+            return false;
+        }
+
+        $row = $DB->request([
+            'SELECT' => ['itemtype'],
+            'FROM' => self::TABLE,
+            'WHERE' => ['message_hash' => hash('sha256', $message_id)],
+            'LIMIT' => 1,
+        ])->current();
+
+        // A Pending row belongs to an in-flight collector. It is not yet a
+        // completed duplicate and must not send the mail to Refused.
+        return is_array($row) && ($row['itemtype'] ?? '') !== 'Pending';
     }
 
     private static function claimMessage(string $message_id, int $ticket_id): bool
@@ -392,25 +456,31 @@ class PluginMailthreadlinkThreadmatcher
         }
         self::$messageLocks[$hash] = $lock_name;
 
-        $now = $_SESSION['glpi_currenttime'] ?? date('Y-m-d H:i:s');
-        $DB->doQuery(
-            'INSERT IGNORE INTO `' . self::TABLE . '`'
-            . ' (`message_hash`, `message_id`, `tickets_id`, `itemtype`, `items_id`, `date_creation`)'
-            . ' VALUES ('
-            . DBmysql::quoteValue($hash) . ', '
-            . DBmysql::quoteValue(mb_substr($message_id, 0, 998)) . ', '
-            . $ticket_id . ', '
-            . DBmysql::quoteValue('Pending') . ', 0, '
-            . DBmysql::quoteValue($now)
-            . ')'
-        );
+        $claimed = false;
+        try {
+            $now = $_SESSION['glpi_currenttime'] ?? date('Y-m-d H:i:s');
+            $DB->doQuery(
+                'INSERT IGNORE INTO `' . self::TABLE . '`'
+                . ' (`message_hash`, `message_id`, `tickets_id`, `itemtype`, `items_id`, `date_creation`)'
+                . ' VALUES ('
+                . DBmysql::quoteValue($hash) . ', '
+                . DBmysql::quoteValue(mb_substr($message_id, 0, 998)) . ', '
+                . $ticket_id . ', '
+                . DBmysql::quoteValue('Pending') . ', 0, '
+                . DBmysql::quoteValue($now)
+                . ')'
+            );
 
-        if ($DB->affectedRows() === 1) {
-            return true;
+            $claimed = $DB->affectedRows() === 1;
+            return $claimed;
+        } finally {
+            // A successful claim is released by storeMessage() after the
+            // Ticket/Followup hook. On an insert failure, release it here so
+            // one broken message cannot poison later collector work.
+            if (!$claimed) {
+                self::releaseMessageLock($hash);
+            }
         }
-
-        self::releaseMessageLock($hash);
-        return false;
     }
 
     private static function removeExpiredClaims(): void
@@ -516,6 +586,37 @@ class PluginMailthreadlinkThreadmatcher
             ]);
         } finally {
             self::releaseMessageLock($hash);
+        }
+    }
+
+    private static function logEvent(
+        array $headers,
+        string $result,
+        string $reason,
+        ?int $ticket_id = null,
+        ?string $details = null
+    ): void {
+        global $DB;
+
+        if (!$DB->tableExists(self::LOG_TABLE)) {
+            return;
+        }
+
+        $message_id = self::normalizeMessageId((string) ($headers['message_id'] ?? ''));
+        try {
+            $DB->insert(self::LOG_TABLE, [
+                'date_creation' => $_SESSION['glpi_currenttime'] ?? date('Y-m-d H:i:s'),
+                'result' => $result,
+                'reason' => $reason,
+                'message_hash' => $message_id !== '' ? hash('sha256', $message_id) : null,
+                'message_id' => $message_id !== '' ? mb_substr($message_id, 0, 998) : null,
+                'sender' => mb_substr(self::normalizeEmail((string) ($headers['from'] ?? '')), 0, 255) ?: null,
+                'tickets_id' => $ticket_id,
+                'details' => $details !== null ? mb_substr($details, 0, 255) : null,
+            ]);
+        } catch (Throwable $e) {
+            // Diagnostics must never turn a mail decision into a failed import.
+            Toolbox::logInFile('mailthreadlink', 'Unable to write diagnostic log: ' . $e->getMessage() . "\n");
         }
     }
 }

@@ -14,13 +14,25 @@ notification.
    and follow-up creation.
 4. GLPI's normal follow-up permission checks remain in force.
 5. Already processed `Message-ID` values are rejected to prevent duplicates.
-6. The sender must be a ticket actor, an alternate ticket address, or a linked
-   supplier.
-7. Reply-all follow-ups that already went directly to other recipients are
+6. If the sender cannot be authorized for the referenced ticket, the plugin
+   leaves the message to GLPI's normal new-ticket rules instead of sending it
+   to `Refused`.
+7. A temporary concurrent-collector claim conflict also falls back to normal
+   GLPI processing; only an exact duplicate is deliberately rejected.
+8. Reply-all follow-ups that already went directly to other recipients are
    imported without sending a second GLPI follow-up notification to the same
    conversation, including replies matched by GLPI's native ticket headers.
 
 The plugin never links messages by subject alone.
+
+## Diagnostics
+
+The plugin records its own decisions in the **Mail Thread Link log** under
+GLPI's plugin configuration page. A deliberate duplicate refusal is recorded
+with its reason, Message-ID, sender and referenced ticket. This log does not
+replace GLPI's own mail collector diagnostics: blacklist, permission and
+parsing failures handled by GLPI outside this plugin remain in GLPI's
+**Not imported emails** view or mailgate logs.
 
 ## Requirements
 

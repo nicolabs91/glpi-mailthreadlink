@@ -127,4 +127,12 @@ assertSameValue(
     'Support-only mailcollector follow-ups keep regular GLPI notifications enabled.'
 );
 
+assertSameValue(
+    'sender@example.test',
+    (new ReflectionClass(PluginMailthreadlinkThreadmatcher::class))
+        ->getMethod('normalizeEmail')
+        ->invoke(null, 'Sender Name <Sender@Example.Test>'),
+    'Display names are normalized before sender authorization.'
+);
+
 fwrite(STDOUT, "Mail Thread Link header tests passed.\n");

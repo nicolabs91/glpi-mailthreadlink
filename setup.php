@@ -4,7 +4,7 @@ if (!defined('GLPI_ROOT')) {
     die('Sorry. You cannot access this file directly');
 }
 
-define('PLUGIN_MAILTHREADLINK_VERSION', '0.1.1');
+define('PLUGIN_MAILTHREADLINK_VERSION', '0.1.3');
 
 function plugin_init_mailthreadlink(): void
 {
@@ -13,6 +13,7 @@ function plugin_init_mailthreadlink(): void
     Plugin::registerClass('PluginMailthreadlinkThreadmatcher');
 
     $PLUGIN_HOOKS['csrf_compliant']['mailthreadlink'] = true;
+    $PLUGIN_HOOKS['config_page']['mailthreadlink'] = 'front/log.php';
     $PLUGIN_HOOKS['use_rules']['mailthreadlink'] = [RuleMailCollector::class];
     $PLUGIN_HOOKS['pre_item_add']['mailthreadlink'] = [
         ITILFollowup::class => 'plugin_mailthreadlink_pre_item_add',

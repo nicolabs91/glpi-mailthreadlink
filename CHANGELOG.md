@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.3 - 2026-08-13
+
+- Add a database-backed diagnostic log for plugin decisions.
+- Show duplicate Refused decisions with Message-ID, sender and ticket context.
+- Show fallback decisions for unauthorized senders and temporary claim conflicts.
+- Add a GLPI configuration page for reviewing the recent plugin log.
+
+## 0.1.2 - 2026-08-13
+
+- Avoid refusing mail when the thread sender cannot be matched to the ticket;
+  GLPI now applies its normal new-ticket rules instead.
+- Avoid refusing mail when a concurrent collector temporarily cannot claim the
+  message; only an exact already-processed `Message-ID` remains a deliberate
+  duplicate rejection.
+- Treat in-flight `Pending` claims as temporary rather than completed
+  duplicates, preventing a second collector from unnecessarily refusing mail.
+
 ## 0.1.1 - 2026-06-29
 
 - Suppress GLPI's extra follow-up notification for reply-all mail collector

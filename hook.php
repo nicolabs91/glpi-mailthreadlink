@@ -26,6 +26,9 @@ function plugin_mailthreadlink_uninstall(): bool
     if ($DB->tableExists(PluginMailthreadlinkThreadmatcher::TABLE)) {
         $DB->doQuery('DROP TABLE `' . PluginMailthreadlinkThreadmatcher::TABLE . '`');
     }
+    if ($DB->tableExists(PluginMailthreadlinkThreadmatcher::LOG_TABLE)) {
+        $DB->doQuery('DROP TABLE `' . PluginMailthreadlinkThreadmatcher::LOG_TABLE . '`');
+    }
 
     return true;
 }
